@@ -25,17 +25,39 @@ class CharlieMnemonic(ChatSession):
     context: List[str] = field(default_factory=list)
     max_prompt_size: int = 8192
     chat_id: str = "New chat"
-    endpoint: str = "https://clang.goodai.com"
+    url: str = "127.0.0.1"
+    port: str = "8002"
     token: str = ""
-    user_name: str = ""
+    user_name: str = "admin"
+    password: str = "admin"
     initial_costs_usd: float = 0.0
 
     @property
     def name(self):
         return f"{super().name} - {self.max_prompt_size}"
 
+    @property
+    def endpoint(self):
+        return "http://" + self.url + ":" + self.port
+
+    def register(self):
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+        body = {
+            "username": "benchmark",
+            "password": "benchmark",
+            "display_name": "benchmark"
+
+        }
+
+
     def __post_init__(self):
         super().__post_init__()
+        # self.register()
+        # self.login()
+
         browsers = [
             browser_cookie3.chrome,
             browser_cookie3.firefox,
@@ -48,15 +70,15 @@ class CharlieMnemonic(ChatSession):
         # We don't know which browser the user is using, so search for the most obvious ones:
         for b in browsers:
             try:
-                cj = list(b(domain_name="clang.goodai.com"))
-                self.token, self.user_name = try_extract_session_cookie(cj)
-                if self.token != "" and self.user_name != "":
+                cj = list(b(domain_name=self.url))
+                self.token, token_user_name = try_extract_session_cookie(cj)
+                if self.token != "" and token_user_name == self.user_name:
                     break
             except:
                 continue
 
         if self.token == "":
-            raise ValueError("No valid clang login found! Please login via browser.")
+            raise ValueError("No valid charlie login found! Please login via browser.")
 
         body = {"username": self.user_name, "session_token": self.token}
         valid = requests.post(self.endpoint + "/check_token/", json=body)
@@ -67,25 +89,42 @@ class CharlieMnemonic(ChatSession):
             )
 
         # Get display name and current costs of user
-        settings_dict = self.get_settings()
-        self.display_name = settings_dict["display_name"][0]
-        self.initial_costs_usd = settings_dict["usage"]["total_cost"]
+        # settings_dict = self.get_settings()
+        # self.display_name = settings_dict["display_name"][0]
+        # self.initial_costs_usd = settings_dict["usage"]["total_cost"]
+        #
+        # # Update max_tokens
+        # headers = {
+        #     "Content-Type": "application/json",
+        #     "Cookie": f"session_token={self.token}",
+        # }
+        # body = {
+        #     "username": self.user_name,
+        #     "category": "memory",
+        #     "setting": "max_tokens",
+        #     "value": self.max_prompt_size,
+        # }
+        #
+        # update = requests.post(
+        #     self.endpoint + "/update_settings/", headers=headers, json=body
+        # )
 
-        # Update max_tokens
+    def login(self):
+
         headers = {
             "Content-Type": "application/json",
-            "Cookie": f"session_token={self.token}",
-        }
-        body = {
-            "username": self.user_name,
-            "category": "memory",
-            "setting": "max_tokens",
-            "value": self.max_prompt_size,
         }
 
-        update = requests.post(
-            self.endpoint + "/update_settings/", headers=headers, json=body
+        body = {
+            "username": self.user_name,
+            "password": self.password,
+        }
+
+        response_json = json.loads(
+            requests.post(self.endpoint + "/login/", headers=headers, json=body).text
         )
+
+        a = 1
 
     def reply(self, user_message) -> str:
         headers = {
@@ -96,7 +135,7 @@ class CharlieMnemonic(ChatSession):
         body = {
             "prompt": user_message,
             "username": self.user_name,
-            "display_name": self.display_name,
+            "display_name": self.user_name,
             "chat_id": self.chat_id,
         }
 

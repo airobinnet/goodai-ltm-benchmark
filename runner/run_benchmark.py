@@ -12,6 +12,7 @@ from goodai.ltm.agent import LTMAgentVariant
 from pathlib import Path
 from dataset_interfaces.factory import DatasetFactory, DATASETS
 from dataset_interfaces.interface import TestExample
+from model_interfaces.charlie_interface import CharlieMnemonic
 from model_interfaces.claude_interface import ClaudeChatSession
 from model_interfaces.length_bias_agent import LengthBiasAgent
 from model_interfaces.interface import ChatSession
@@ -78,6 +79,9 @@ def get_chat_session(name: str, max_prompt_size: Optional[int], run_name: str) -
         return ClaudeChatSession(**kwargs, model="claude-3-opus-20240229")
     elif name == "human":
         return HumanChatSession(**kwargs)
+    elif name == "charlie":
+        return CharlieMnemonic(**kwargs)
+
     else:
         raise ValueError(f"Unrecognized agent: {name}")
 
