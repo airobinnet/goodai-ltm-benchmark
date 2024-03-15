@@ -3,34 +3,27 @@ from dataclasses import dataclass, field
 from typing import List
 
 import browser_cookie3
+from requests import Session
+
 from model_interfaces.interface import ChatSession
 import requests
 
 from utils.constants import ResetPolicy
 
 
-def try_extract_session_cookie(cj):
-    user_name = ""
-    session_token = ""
-    for cookie in cj:
-        if cookie.name == "session_token":
-            session_token = cookie.value
-        if cookie.name == "username":
-            user_name = cookie.value.replace('"', "")
-    return session_token, user_name
-
-
 @dataclass
 class CharlieMnemonic(ChatSession):
     context: List[str] = field(default_factory=list)
     max_prompt_size: int = 8192
-    chat_id: str = "New chat"
+    chat_id: str = "Benchmark"
     url: str = "127.0.0.1"
     port: str = "8002"
     token: str = ""
     user_name: str = "admin"
     password: str = "admin"
     initial_costs_usd: float = 0.0
+    session: Session = field(default_factory=requests.Session)
+    initialised: bool = False
 
     @property
     def name(self):
@@ -40,147 +33,79 @@ class CharlieMnemonic(ChatSession):
     def endpoint(self):
         return "http://" + self.url + ":" + self.port
 
-    def register(self):
-
-        headers = {
-            "Content-Type": "application/json",
-        }
-        body = {
-            "username": "benchmark",
-            "password": "benchmark",
-            "display_name": "benchmark"
-
-        }
-
-
     def __post_init__(self):
         super().__post_init__()
-        # self.register()
-        # self.login()
-
-        browsers = [
-            browser_cookie3.chrome,
-            browser_cookie3.firefox,
-            browser_cookie3.chromium,
-            browser_cookie3.edge,
-            browser_cookie3.safari,
-        ]
-
-        # Extract session token from cookie
-        # We don't know which browser the user is using, so search for the most obvious ones:
-        for b in browsers:
-            try:
-                cj = list(b(domain_name=self.url))
-                self.token, token_user_name = try_extract_session_cookie(cj)
-                if self.token != "" and token_user_name == self.user_name:
-                    break
-            except:
-                continue
-
-        if self.token == "":
-            raise ValueError("No valid charlie login found! Please login via browser.")
-
-        body = {"username": self.user_name, "session_token": self.token}
-        valid = requests.post(self.endpoint + "/check_token/", json=body)
-
-        if valid.status_code != 200:
-            raise ValueError(
-                "Username/session token combination found by invalid! Please make sure your cookies are up to date."
-            )
+        self.login()
 
         # Get display name and current costs of user
-        # settings_dict = self.get_settings()
-        # self.display_name = settings_dict["display_name"][0]
-        # self.initial_costs_usd = settings_dict["usage"]["total_cost"]
-        #
-        # # Update max_tokens
-        # headers = {
-        #     "Content-Type": "application/json",
-        #     "Cookie": f"session_token={self.token}",
-        # }
-        # body = {
-        #     "username": self.user_name,
-        #     "category": "memory",
-        #     "setting": "max_tokens",
-        #     "value": self.max_prompt_size,
-        # }
-        #
-        # update = requests.post(
-        #     self.endpoint + "/update_settings/", headers=headers, json=body
-        # )
+        settings_dict = self.get_settings()
+        self.display_name = settings_dict["display_name"]
+        self.initial_costs_usd = settings_dict["usage"]["total_cost"]
+
+        #TODO: Setting of max tokens
+
 
     def login(self):
-
-        headers = {
-            "Content-Type": "application/json",
-        }
-
         body = {
             "username": self.user_name,
             "password": self.password,
         }
 
-        response_json = json.loads(
-            requests.post(self.endpoint + "/login/", headers=headers, json=body).text
-        )
+        response = self.session.post(self.endpoint + "/login/", json=body)
 
-        a = 1
+        if response.status_code == 200:
+            print("Login successful.")
+            # Extract the session token and username from the response cookies
+            session_token = response.cookies.get("session_token")
+            username = response.cookies.get("username")
+            # Set the session token and username cookies in the session object
+            self.session.cookies.set("session_token", session_token)
+            self.session.cookies.set("username", username)
+        else:
+            raise ValueError(f"Login failed Status code: {response.status_code}, Response: {response.text}")
 
     def reply(self, user_message) -> str:
-        headers = {
-            "Content-Type": "application/json",
-            "Cookie": f"session_token={self.token}",
-        }
+        if not self.initialised:
+            self.reset()
 
-        body = {
+        message_data = {
             "prompt": user_message,
             "username": self.user_name,
-            "display_name": self.user_name,
+            "display_name": self.display_name,
             "chat_id": self.chat_id,
         }
 
-        response_json = json.loads(
-            requests.post(self.endpoint + "/message/", headers=headers, json=body).text
-        )
+        response = self.session.post(self.endpoint + "/message/", json=message_data)
 
-        # Update costs
-        settings = self.get_settings()
-        self.costs_usd = settings["usage"]["total_cost"] - self.initial_costs_usd
+        if response.status_code == 200:
+            # Update costs
+            settings = self.get_settings()
+            self.costs_usd = settings["usage"]["total_cost"] - self.initial_costs_usd
 
-        try:
-            return response_json["content"]
-        except KeyError as exc:
-            exc.add_note(f"Received JSON:\n{response_json}")
-            raise
+            return response.text
+        else:
+            raise ValueError(f"Failed to send message. Status code; {response.status_code}, Response: {response.text}")
 
     def get_settings(self):
-        headers = {
-            "Content-Type": "application/json",
-            "Cookie": f"session_token={self.token}",
-        }
         body = {"username": self.user_name}
-
-        settings = requests.post(
-            self.endpoint + "/load_settings/", headers=headers, json=body
-        )
+        settings = self.session.post(self.endpoint + "/load_settings/", json=body)
         return json.loads(settings.text)
 
     def reset(self):
-        # Delete the user data
-        headers = {
-            "Content-Type": "application/json",
-            "Cookie": f"session_token={self.token}",
-        }
-        body = {"username": self.user_name}
-        delete_req = requests.post(
-            self.endpoint + "/delete_data_keep_settings", headers=headers, json=body
-        )
+        self.initialised = True
 
-        self.context = []
+        # Delete the user and memory data
+        delete_req = self.session.post(self.endpoint + "/delete_data_keep_settings/")
+        #
+        # # Erase the context/chat
+        # body = {"username": self.user_name, "chat_id": self.chat_id}
+        # chat_delete_req = self.session.post(self.endpoint + "/delete_chat_tab/", json=body)
+        a = 1
 
     def load(self):
         # Charlie mnemonic is web based and so doesn't need to be manually told to resume a conversation
-        pass
+        self.initialised = True
+        #TODO: We might need to get the correct chat
 
     def save(self):
         # Charlie mnemonic is web based and so doesn't need to be manually told to persist
