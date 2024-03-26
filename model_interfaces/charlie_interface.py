@@ -2,13 +2,11 @@ import json
 from dataclasses import dataclass, field
 from typing import List
 
-import browser_cookie3
+from goodai.helpers.json_helper import sanitize_and_parse_json
 from requests import Session
 
 from model_interfaces.interface import ChatSession
 import requests
-
-from utils.constants import ResetPolicy
 
 
 @dataclass
@@ -43,7 +41,6 @@ class CharlieMnemonic(ChatSession):
         self.initial_costs_usd = settings_dict["usage"]["total_cost"]
 
         #TODO: Setting of max tokens
-
 
     def login(self):
         body = {
@@ -82,7 +79,9 @@ class CharlieMnemonic(ChatSession):
             settings = self.get_settings()
             self.costs_usd = settings["usage"]["total_cost"] - self.initial_costs_usd
 
-            return response.text
+            response_text = sanitize_and_parse_json(response.text)["content"]
+
+            return response_text
         else:
             raise ValueError(f"Failed to send message. Status code; {response.status_code}, Response: {response.text}")
 
@@ -96,16 +95,21 @@ class CharlieMnemonic(ChatSession):
 
         # Delete the user and memory data
         delete_req = self.session.post(self.endpoint + "/delete_data_keep_settings/")
-        #
-        # # Erase the context/chat
-        # body = {"username": self.user_name, "chat_id": self.chat_id}
-        # chat_delete_req = self.session.post(self.endpoint + "/delete_chat_tab/", json=body)
-        a = 1
+
+        body = {"username": self.user_name, "chat_id": self.chat_id, "chat_name": self.chat_id}
+        response = self.session.post(self.endpoint + "/create_chat_tab/", json=body)
+        assert response.status_code == 200, "Chat tab could not be created!"
+        body = {"username": self.user_name, "chat_id": self.chat_id}
+        response = self.session.post(self.endpoint + "/set_active_tab/", json=body)
+        assert response.status_code == 200, "Active chat tab could not be set!"
 
     def load(self):
         # Charlie mnemonic is web based and so doesn't need to be manually told to resume a conversation
         self.initialised = True
-        #TODO: We might need to get the correct chat
+        body = {"username": self.user_name, "chat_id": self.chat_id}
+        response = self.session.post(self.endpoint + "/set_active_tab/", json=body)
+        assert response.status_code == 200, "Setting active tab on load has failed!"
+
 
     def save(self):
         # Charlie mnemonic is web based and so doesn't need to be manually told to persist
