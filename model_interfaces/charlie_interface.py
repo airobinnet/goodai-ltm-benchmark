@@ -72,12 +72,14 @@ class CharlieMnemonic(ChatSession):
             "chat_id": self.chat_id,
         }
 
+        current_cost = self.get_session_cost()
         response = self.session.post(self.endpoint + "/message/", json=message_data)
 
         if response.status_code == 200:
             # Update costs
-            settings = self.get_settings()
-            self.costs_usd = settings["usage"]["total_cost"] - self.initial_costs_usd
+
+            response_cost = self.get_session_cost() - current_cost
+            self.costs_usd += response_cost
 
             response_text = sanitize_and_parse_json(response.text)["content"]
 
@@ -114,3 +116,7 @@ class CharlieMnemonic(ChatSession):
     def save(self):
         # Charlie mnemonic is web based and so doesn't need to be manually told to persist
         pass
+
+    def get_session_cost(self):
+        settings = self.get_settings()
+        return settings["usage"]["total_cost"] - self.initial_costs_usd
