@@ -12,6 +12,7 @@ import yaml
 from pathlib import Path
 from dataset_interfaces.factory import DatasetFactory, DATASETS
 from dataset_interfaces.interface import TestExample
+from model_interfaces.joe_ltm_prototype_real import JoeLTMPrototype
 from model_interfaces.length_bias_agent import LengthBiasAgent
 from model_interfaces.interface import ChatSession
 from model_interfaces.llm_interface import LLMChatSession, TimestampLLMChatSession
@@ -65,6 +66,8 @@ def get_chat_session(name: str, max_prompt_size: Optional[int], run_name: str, i
     if name.startswith("huggingface/"):
         kwargs.pop("is_local")
         return HFChatSession(model=name, **kwargs)
+    if name == "prototype":
+        return JoeLTMPrototype(**kwargs)
 
     try:
         if name.startswith("ts-"):
