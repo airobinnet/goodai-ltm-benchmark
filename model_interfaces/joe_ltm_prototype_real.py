@@ -41,6 +41,7 @@ You should address and reply to this current message.
 
 _inner_loop_plan = """
 Create a plan for the next step of addressing the above user message using one of the tools that you have available to you.
+Getting memories can be expensive. Do it only if you know that the memories will help.
 """
 
 
@@ -90,7 +91,7 @@ You are reading from a vector database to satisfy a query.
 The original query is: {{original_query}}.
 
 Read from the vector database and consolidate the memories into a useful summary.
-Keywords will narrow down search results to the keyword topics. Choose at most 5 keywords. 
+Keywords will narrow down search results to the keyword topics. Group related keywords together.
  
 Each run see if the memories are relevant, if there are no relevant memories at all, then the topic is not in memory.
 
@@ -128,7 +129,7 @@ If it is related enough, then you cna choose to delete it. Formulate your answer
 
 _state_reconstruction_prompt = """
 You will be shown a series of memories one at a time, and what the current state is.
-For each of these memories, integrate it into the current state, updating or replacing the state as necessary.
+For each of these memories, integrate it into the current state, updating, replacing, or deleting the state as necessary.
 Write the state as a JSON object for clarity.
 """
 
@@ -416,7 +417,7 @@ class JoeLTMPrototype(ChatSession):
             # Make a plan for the next step
             # colour_print("Yellow", f"Attempting Planning call:")
             # self.dump_context(context)
-            plan_response = litellm.completion(model="gpt-4o", messages=context, tools=TOOL_DEFS, tool_choice="none")
+            plan_response = litellm.completion(model="gpt-4-turbo", messages=context, tools=TOOL_DEFS, tool_choice="none")
             context.append(make_assistant_message(plan_response.choices[0].message.content))
 
             colour_print("GREEN", f"Plan is: {plan_response.choices[0].message.content}")
@@ -485,23 +486,19 @@ class JoeLTMPrototype(ChatSession):
         memories = []
         queried_memories = self.manual_knowledge.retrieve(query, 100)
         for m in queried_memories:
-            colour_print("Magenta", f"Memory: {m.passage}")
-            if keywords == "":
-                memories.append(m)
-                continue
-
-            if m.relevance < 0.6:
-                continue
+            # if keywords == "":
+            #     colour_print("Magenta", f"Using Memory: {m.passage}")
+            #     memories.append(m)
+            #     continue
 
             mem_kws = m.metadata["keywords"]
 
             for kw in filtering_kws:
                 if kw in mem_kws:
+                    colour_print("Magenta", f"Using Memory: {m.passage}")
                     colour_print("Magenta", "\tAccepted")
                     memories.append(m)
                     break
-                else:
-                    colour_print("Magenta", "\tRejected")
 
         colour_print("MAGENTA", f"Found {len(memories)} memories.")
         # interaction_memories = self.interaction_memories.retrieve(query, 5)
@@ -529,6 +526,9 @@ class JoeLTMPrototype(ChatSession):
 
     def read_memory_loop(self, query):
 
+        if "trivia" in query.lower():
+            return "No memories found"
+
         # self.memory_loop_active = True
         context = [make_user_message(pystache.render(_read_memory_loop, {"original_query": query, "keywords": list(self.defined_kws)}))]
         while True:
@@ -539,7 +539,7 @@ class JoeLTMPrototype(ChatSession):
             # print(f"LLM call with: {response.choices[0].message.model_extra}")
 
             # Create a plan
-            plan_response = litellm.completion(model="gpt-4o", messages=context, tools=TOOL_READ_MEMORY_LOOP, tool_choice="none")
+            plan_response = litellm.completion(model="gpt-4-turbo", messages=context, tools=TOOL_READ_MEMORY_LOOP, tool_choice="none")
             context.append(make_assistant_message(plan_response.choices[0].message.content))
 
             colour_print("GREEN", f"Memory read plan is: {plan_response.choices[0].message.content}")
@@ -550,8 +550,6 @@ class JoeLTMPrototype(ChatSession):
             response = litellm.completion(model="gpt-4o", messages=context, tools=TOOL_READ_MEMORY_LOOP, tool_choice="required")
 
             tool_use = response.choices[0].message.tool_calls
-
-
             success, new_context = self.use_tools(tool_use)
 
             if not success:
@@ -568,19 +566,24 @@ class JoeLTMPrototype(ChatSession):
         return results
 
     def save_passive_memory(self, memory):
-        context = [make_user_message(f"Create three general keywords to describe the topic of this interaction:\n{memory}.\nProduce the keywords in JSON like: `[keyword_1, keyword_2, keyword_3]`")]
+        while True:
+            context = [make_user_message(f"Create two general keywords to describe the topic of this interaction:\n{memory}.\nProduce the keywords in JSON like: `[keyword_1, keyword_2, keyword_3]`\nReuse these keywords if appropriate {list(self.defined_kws)}")]
 
-        response = litellm.completion(model="gpt-3.5-turbo", messages=context)
-        kws = sanitize_and_parse_json(response.choices[0].message.content)
-        for kw in kws:
-            self.defined_kws.add(kw)
+            response = litellm.completion(model="gpt-4o", messages=context)
+            try:
+                kws = [k.lower() for k in sanitize_and_parse_json(response.choices[0].message.content)]
+            except:
+                continue
+            for kw in kws:
+                self.defined_kws.add(kw)
 
-        self.manual_knowledge.add_text(memory, metadata={"timestamp": datetime.now(), "keywords": kws})
-        self.manual_knowledge.add_separator()
-        colour_print("BLUE", f"Saved memory: {memory}\nwith keywords {repr(kws)}")
+            self.manual_knowledge.add_text(memory, metadata={"timestamp": datetime.now(), "keywords": kws})
+            self.manual_knowledge.add_separator()
+            colour_print("BLUE", f"Saved memory: {memory}\nwith keywords {repr(kws)}")
+            break
 
     def save_memory(self, data: str, keywords: str):
-        kws = sorted([s.strip() for s in keywords.split(",")])
+        kws = sorted([s.strip().lower() for s in keywords.split(",")])
         self.manual_knowledge.add_text(data, metadata={"timestamp": datetime.now(), "keywords": kws})
         self.manual_knowledge.add_separator()
         return f"Saved memory {data}."
@@ -654,13 +657,23 @@ class JoeLTMPrototype(ChatSession):
         current_state = "{}"
         context = [make_system_message(_state_reconstruction_prompt)]
 
-        for memory in reversed(split_mems):
+        colour_print("YELLOW", f"Performing aggregation on these memories in this order:")
+        for m in reversed(split_mems):
+            colour_print("YELLOW", f"{repr(m)}\n")
+
+        for idx, memory in enumerate(reversed(split_mems)):
             context.append(make_user_message(pystache.render(_current_state, {"state": current_state})))
             context.append(make_user_message(f"Create a new state by integrating the current state with this new information:\n{memory}"))
 
             response = litellm.completion(model="gpt-4o", messages=context)
 
+            print(f"Integrating {idx+1}/{len(split_mems)}")
+            # print(f"Integrating: {memory}\n")
+            # print(f"Integrated into:\n{current_state}\n")
             current_state = response.choices[0].message.content
+
+            # print(f"New state: {current_state}\n\n")
+
             context = context[:1]
 
         return current_state

@@ -147,7 +147,10 @@ class ShoppingDataset(DatasetInterface):
 
         # Check response format
         try:
-            answer_items = sanitize_and_parse_json(responses[0])
+            # Clean the string up a bit, remove newlines and such
+            answer = responses[0].replace("\\n", "")
+
+            answer_items = sanitize_and_parse_json(answer)
             assert isinstance(answer_items, list)
             for item in answer_items:
                 assert isinstance(item["item"], str)
