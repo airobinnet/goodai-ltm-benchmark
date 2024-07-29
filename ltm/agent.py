@@ -11,7 +11,6 @@ from goodai.ltm.mem.config import TextMemoryConfig
 from goodai.ltm.mem.default import DefaultTextMemory
 from litellm import token_counter
 from model_interfaces.base_ltm_agent import Message
-
 from utils.llm import make_system_message, make_user_message, ask_llm, debug_actions
 from utils.text import td_format
 from utils.ui import colour_print

@@ -1,6 +1,6 @@
-import datetime
 import string
 from rouge_score import rouge_scorer
+from datetime import timedelta
 
 
 def rouge_l(reference: str, candidate: str) -> float:
@@ -19,7 +19,7 @@ def truncate(s: str, length: int = 40) -> str:
     return s[:length - 3].rstrip(string.punctuation) + "..."
 
 
-def td_format(td: datetime.timedelta) -> str:
+def td_format(td: timedelta) -> str:
     seconds = int(td.total_seconds())
     periods = [
         ('year', 3600*24*365), ('month', 3600*24*30), ('day', 3600*24), ('hour', 3600), ('minute', 60), ('second', 1)
