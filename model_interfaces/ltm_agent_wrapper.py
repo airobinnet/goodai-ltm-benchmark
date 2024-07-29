@@ -13,6 +13,7 @@ from model_interfaces.interface import ChatSession
 class LTMAgentWrapper(ChatSession):
     model: str = None
     max_prompt_size: int = None
+    max_message_size: int = 1024
 
     def __post_init__(self):
         self.agent = InsertedContextAgent(
@@ -22,7 +23,7 @@ class LTMAgentWrapper(ChatSession):
     @property
     def name(self):
         model = self.model.replace("/", "-")
-        return f"{super().name} - {model} - {self.max_prompt_size}"
+        return f"Proto{super().name} - {model} - {self.max_prompt_size}"
 
     @property
     def state_path(self) -> Path:
