@@ -2,8 +2,11 @@ from typing import Optional, Callable
 import litellm
 from litellm import completion, token_counter
 from transformers import AutoTokenizer
+
+from utils.constants import DATA_DIR
 from utils.ui import colour_print
 
+_debug_dir = DATA_DIR.joinpath("ltm_debug_info")
 litellm.modify_params = True  # To allow it adjusting the prompt for Claude LLMs
 claude_adjust_factor = 1.1  # Approximate the real token count given by the API.
 
@@ -172,3 +175,35 @@ def create_huggingface_chat_context(model: str, context: LLMContext):
     tokenizer = AutoTokenizer.from_pretrained(model_only)
     c = context[1:] if context[0]["role"] == "system" else context
     return tokenizer.apply_chat_template(c, tokenize=False)
+
+
+def debug_actions(context: list[dict[str, str]], temperature: float, response_text: str, llm_call_idx: int, debug_level: int, save_name: str, name_template: str = None):
+    if debug_level < 1:
+        return
+
+    # See if dir exists or create it, and set llm_call_idx
+    save_dir = _debug_dir.joinpath(save_name)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    if llm_call_idx is None:
+        if save_dir.exists() and len(list(save_dir.glob("*.txt"))) > 0:
+            llm_call_idx = max(int(p.name.removesuffix(".txt")) for p in save_dir.glob("*.txt")) + 1
+        else:
+            llm_call_idx = 0
+
+    # Write content of LLM call to file
+    if name_template:
+        save_path = save_dir.joinpath(f"{name_template.format(idx=llm_call_idx)}.txt")
+    else:
+        save_path = save_dir.joinpath(f"{llm_call_idx:06d}.txt")
+
+    with open(save_path, "w") as fd:
+        fd.write(f"LLM temperature: {temperature}\n")
+        for m in context:
+            fd.write(f"--- {m['role'].upper()}\n{m['content']}\n")
+        fd.write(f"--- Response:\n{response_text}")
+
+    # Wait for confirmation
+    if debug_level < 2:
+        return
+    print(f"LLM call saved as {save_path.name}")
+    input("Press ENTER to continue...")
