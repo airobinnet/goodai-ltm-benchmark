@@ -1,3 +1,4 @@
+import ltm.scratchpad as sp
 from dataclasses import dataclass
 from typing import Callable
 from datetime import datetime
@@ -5,19 +6,16 @@ from ltm.agent import LTMAgent
 from utils.ui import colour_print
 from utils.llm import LLMContext, make_user_message, make_assistant_message
 from goodai.ltm.agent import Message
+from ltm.distill_proto import distill_scratchpad, distill_memories, reply_from_distilled
+
+
+CostCallback = Callable[[float], None]
 
 
 @dataclass
 class LTMReflexionAgent(LTMAgent):
 
     def reply(self, user_content: str, cost_callback: Callable[[float], None] = None) -> str:
-        """
-        Asks the LLM to generate a completion from a user question/statement.
-        This method first constructs a prompt from session history and memory excerpts.
-        :param user_content: The user's question or statement.
-        :param cost_callback: An optional function used to track LLM costs.
-        :return: The agent's completion or reply.
-        """
         self.now = datetime.now()
         session = self.session
         context = self._build_llm_context(session.message_history, user_content,
@@ -29,6 +27,14 @@ class LTMReflexionAgent(LTMAgent):
             session.add(message)
             self._add_to_convo_memory(message)
         return response
+
+    def _distill_scratchpad(self, user_message: str, cost_cb: CostCallback) -> dict:
+        reply = lambda ctx: self._completion(ctx, 0, "distill_scratchpad", cost_cb)
+        return distill_scratchpad(user_message, self.user_info, reply)
+
+    def _distill_memories(self, user_message: str, memories: str, cost_cb: CostCallback) -> str:
+        reply = lambda ctx: self._completion(ctx, 0, "distill_memories", cost_cb)
+        return distill_memories(user_message, memories, reply)
 
     def _truncated_completion(self, context: LLMContext, max_messages: int = None, **kwargs) -> str:
         max_messages = max_messages or len(context) + 1
